@@ -1,4 +1,3 @@
-Perfect. Here's a GitHub-friendly Markdown version.
 
 ````markdown
 # Change Data Capture (CDC) & Debezium
