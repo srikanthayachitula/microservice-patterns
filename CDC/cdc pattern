@@ -1,0 +1,345 @@
+Perfect. Here's a GitHub-friendly Markdown version.
+
+````markdown
+# Change Data Capture (CDC) & Debezium
+
+## What problem does CDC solve?
+
+Multiple services often need to react to database changes.
+
+Example:
+
+- Order created
+- Inventory updates
+- Notification sent
+- Analytics updated
+- Search indexed
+
+Without CDC, the application must publish events to every downstream system, creating tight coupling.
+
+---
+
+## What is CDC?
+
+Change Data Capture (CDC) is a technique that captures database changes (INSERT, UPDATE, DELETE) and publishes them as events.
+
+Instead of the application notifying other services, the database becomes the source of truth.
+
+---
+
+## Two Approaches
+
+### 1. Polling
+
+A background worker periodically queries the database.
+
+```sql
+SELECT *
+FROM orders
+WHERE processed = false;
+```
+
+### Advantages
+
+- Easy to implement
+- Works with any database
+
+### Disadvantages
+
+- Constant database queries
+- Higher latency
+- Increased database load
+- Doesn't scale well
+
+---
+
+### 2. Log-Based CDC (Preferred)
+
+Every database maintains a transaction log.
+
+Examples:
+
+| Database | Transaction Log |
+|----------|-----------------|
+| PostgreSQL | WAL (Write Ahead Log) |
+| MySQL | Binlog |
+| SQL Server | Transaction Log |
+| Oracle | Redo Log |
+
+Instead of querying tables, CDC tools read these logs directly.
+
+Advantages:
+
+- No polling
+- Near real-time
+- Very low database overhead
+- Scales much better
+
+---
+
+# What is Debezium?
+
+Debezium is an open-source Change Data Capture platform.
+
+It continuously monitors the database transaction log and publishes changes to Kafka.
+
+Architecture:
+
+```
+Application
+      │
+      ▼
+ Database
+      │
+      ▼
+Transaction Log (WAL / Binlog)
+      │
+      ▼
+  Debezium
+      │
+      ▼
+    Kafka
+      │
+      ▼
+ Consumers
+```
+
+---
+
+## Why read the transaction log instead of polling?
+
+Imagine a table with 100 million rows.
+
+Only one row changes.
+
+Polling:
+
+- Query entire table
+- Find one changed row
+
+Debezium:
+
+- Reads the single committed change from the transaction log
+- Publishes it immediately
+
+This greatly reduces database load.
+
+---
+
+# What does Debezium publish?
+
+Example INSERT
+
+```sql
+INSERT INTO orders(id, status)
+VALUES (10, 'CREATED');
+```
+
+Produces an event similar to:
+
+```json
+{
+  "before": null,
+  "after": {
+    "id": 10,
+    "status": "CREATED"
+  },
+  "op": "c"
+}
+```
+
+Example UPDATE
+
+```json
+{
+  "before": {
+    "status": "CREATED"
+  },
+  "after": {
+    "status": "PAID"
+  },
+  "op": "u"
+}
+```
+
+---
+
+# Why isn't CDC alone enough?
+
+Suppose the application:
+
+```
+Save Order to DB
+        ✓
+
+Publish Kafka Event
+        ✗
+
+Application Crashes
+```
+
+The database contains the order, but Kafka never receives the event.
+
+The event is permanently lost.
+
+CDC solves the publication problem, but not the atomicity problem between business logic and event creation.
+
+---
+
+# Transactional Outbox + Debezium
+
+Best practice is to combine both patterns.
+
+Flow:
+
+```
+Application
+      │
+      ▼
+Business Table
++
+Outbox Table
+      │
+      ▼
+Single Database Transaction
+      │
+      ▼
+Database Commit
+      │
+      ▼
+Transaction Log (WAL)
+      │
+      ▼
+Debezium
+      │
+      ▼
+Kafka
+      │
+      ▼
+Consumers
+```
+
+Responsibilities:
+
+- **Transactional Outbox** guarantees that business data and event metadata are committed atomically.
+- **Debezium** reliably publishes committed outbox events to Kafka.
+
+---
+
+# Can Debezium replace the Outbox Pattern?
+
+Usually, no.
+
+If Debezium watches the business tables directly, every database update becomes an event.
+
+Example:
+
+```
+Order Created
+```
+
+Useful.
+
+Later:
+
+```
+lastViewedTime updated
+```
+
+This also becomes an event, even though downstream services may not care.
+
+The Outbox pattern allows the application to explicitly decide which business events should be published.
+
+Examples:
+
+- OrderCreated
+- PaymentSucceeded
+- OrderCancelled
+
+instead of every database modification.
+
+---
+
+# Polling vs Debezium
+
+| Polling | Debezium |
+|----------|-----------|
+| Simple to implement | More infrastructure |
+| Repeated database queries | Reads transaction log |
+| Higher latency | Near real-time |
+| Higher database load | Very low database load |
+| Good for smaller systems | Better for high-scale systems |
+
+---
+
+# Failure Scenarios
+
+## Debezium crashes
+
+No events are lost.
+
+The transaction log still contains the changes.
+
+After restart, Debezium resumes from its last processed offset.
+
+---
+
+## Kafka is unavailable
+
+Debezium cannot publish events.
+
+Database transactions continue normally.
+
+Once Kafka becomes available again, Debezium resumes publishing from the last saved offset.
+
+---
+
+## Transaction log is deleted
+
+If Debezium falls too far behind and the required WAL/Binlog files are removed, it cannot continue from its previous position.
+
+Recovery usually requires taking a fresh snapshot.
+
+Proper monitoring and transaction log retention are important.
+
+---
+
+# Advantages
+
+- Near real-time event publishing
+- No polling
+- Minimal database overhead
+- Reliable recovery after failures
+- Works well with Kafka
+
+---
+
+# Disadvantages
+
+- Additional infrastructure
+- Operational complexity
+- Database-specific configuration
+- Requires monitoring of offsets and transaction log retention
+
+---
+
+# Real-world Use Cases
+
+- Event-driven microservices
+- Elasticsearch indexing
+- Analytics pipelines
+- Cache synchronization
+- Audit systems
+- Data warehouse synchronization
+
+---
+
+# Key Takeaways
+
+- CDC captures database changes and converts them into events.
+- Debezium is a popular log-based CDC platform.
+- Debezium reads the transaction log instead of polling tables.
+- Transactional Outbox solves atomicity between business data and events.
+- Debezium solves reliable publication of committed events.
+- Outbox and Debezium are complementary patterns and are commonly used together in production systems.
+````
